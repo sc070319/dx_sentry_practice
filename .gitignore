@@ -1,0 +1,7 @@
+build/
+install/
+log/
+__pycache__/
+*.pyc
+src/livox_ros_driver2/Livox-SDK2/build/
+src/livox_ros_driver2/build/
