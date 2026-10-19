@@ -10,7 +10,7 @@ def generate_launch_description():
         package="fake_vel_transform",
         executable="fake_vel_transform_node",
         output="screen",
-        parameters=[{"use_sim_time": use_sim_time}],
+        parameters=[{"use_sim_time": use_sim_time,"spin_speed": 1.0}],
     )
 
     ld = LaunchDescription()

@@ -10,8 +10,8 @@ def generate_launch_description():
     mount_x = DeclareLaunchArgument('mount_x', default_value='0.05289') 
     mount_y = DeclareLaunchArgument('mount_y', default_value='0.15191')   
     mount_z = DeclareLaunchArgument('mount_z', default_value='0.15691')    
-    mount_roll  = DeclareLaunchArgument('mount_roll', default_value='0.0')
-    mount_pitch = DeclareLaunchArgument('mount_pitch', default_value='0.3839')  #pitch偏移22°≈0.3839 rad
+    mount_roll  = DeclareLaunchArgument('mount_roll', default_value='0.3839')  #实测: 倾斜绕x轴(roll) 22°
+    mount_pitch = DeclareLaunchArgument('mount_pitch', default_value='0.0')
     mount_yaw   = DeclareLaunchArgument('mount_yaw', default_value='0.0')       #与大yaw同步，待电控传回
     small_point_lio_node = Node(
         package="small_point_lio",
@@ -53,8 +53,8 @@ def generate_launch_description():
         'mount_x': 0.05289,
         'mount_y': 0.15191,
         'mount_z': 0.15691,
-        'mount_roll': 0.0,
-        'mount_pitch': 0.3839,  # 22°
+        'mount_roll': 0.3839,   # 22°, 实测绕x轴
+        'mount_pitch': 0.0,
     }],
 )
-    return LaunchDescription([small_point_lio_node, static_base_link_to_livox_frame, yaw_tf_broadcaster_node, mount_x, mount_y, mount_z, mount_roll, mount_pitch, mount_yaw])
+    return LaunchDescription([small_point_lio_node, yaw_tf_broadcaster_node, mount_x, mount_y, mount_z, mount_roll, mount_pitch, mount_yaw])

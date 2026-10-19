@@ -282,6 +282,12 @@ else(ROS_EDITION STREQUAL "ROS2")
   target_include_directories(${PROJECT_NAME} PRIVATE ${livox_sdk_INCLUDE_DIRS})
 
   # get include directories of custom msg headers
+  # Allow a plain `colcon build` (without -DDISTRO_ROS=...): fall back to the
+  # ROS_DISTRO environment variable so the correct typesupport branch is used.
+  if(NOT DISTRO_ROS AND DEFINED ENV{ROS_DISTRO})
+    set(DISTRO_ROS $ENV{ROS_DISTRO})
+    message(STATUS "DISTRO_ROS auto-detected: ${DISTRO_ROS}")
+  endif()
   if(DISTRO_ROS STREQUAL "humble" OR DISTRO_ROS STREQUAL "jazzy")
     rosidl_get_typesupport_target(cpp_typesupport_target
     ${LIVOX_INTERFACES} "rosidl_typesupport_cpp")

@@ -5,3 +5,14 @@ __pycache__/
 *.pyc
 src/livox_ros_driver2/Livox-SDK2/build/
 src/livox_ros_driver2/build/
+
+# 建图产物（地图不提交）
+src/cod_-rm2026_-navigation/src/cod_bringup/maps/archive/
+src/cod_-rm2026_-navigation/src/cod_bringup/maps/auto_save/
+src/cod_-rm2026_-navigation/src/cod_bringup/maps/latest.*
+src/cod_-rm2026_-navigation/src/cod_bringup/maps/rmul2026.png
+
+# 备份/临时文件
+*.bak
+*.bak_*
+*~

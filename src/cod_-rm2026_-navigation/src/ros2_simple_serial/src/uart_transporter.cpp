@@ -155,7 +155,6 @@ bool UartTransporter::open() {
     std::cerr << error_message_ << std::endl; // 输出错误信息
     return false;
   }
-  std::cout << "Device opened with fd: " << fd_ << std::endl;
   if (!isatty(fd_)) {
     error_message_ = "Not a terminal device";
     return false; 
@@ -182,7 +181,6 @@ bool UartTransporter::open() {
     return false;
   }
   is_open_ = true;
-  std::cout<<"asdfasldfkj"<<std::endl;
   return true;
 }
 

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  最小导航行为树（不含 ClearEntireCostmap 恢复节点）
+  背景: 2026-10-19 本机 nav2 1.1.20 的 libnav2_clear_costmap_service_bt_node.so
+        在构造 ClearEntireCostmapService 时抛 basic_string::_M_create，
+        导致 bt_navigator 激活失败、RViz 目标无响应。
+        该最小树只做 规划 -> 跟随，可正常激活。
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <PipelineSequence name="NavigateWithReplanning">
+      <RateController hz="1.0">
+        <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+      </RateController>
+      <FollowPath path="{path}" controller_id="FollowPath"/>
+    </PipelineSequence>
+  </BehaviorTree>
+</root>

@@ -62,7 +62,9 @@ namespace small_point_lio {
             transform_stamped.child_frame_id = "base_link";
             geometry_msgs::msg::TransformStamped base_link_to_lidar_frame_transform;
             try {
-                base_link_to_lidar_frame_transform = tf_buffer->lookupTransform(lidar_frame, "base_link", time_msg);
+                // 用"最新可用TF"(TimePointZero): 装位TF由100Hz定频发布, 按精确时间戳查询
+                // 会因毫秒级时间错位偶发 extrapolation 报错并丢弃整帧里程计输出
+                base_link_to_lidar_frame_transform = tf_buffer->lookupTransform(lidar_frame, "base_link", tf2::TimePointZero);
             } catch (tf2::TransformException &ex) {
                 RCLCPP_ERROR(rclcpp::get_logger("small_point_lio"), "Failed to lookup transform from base_link to %s: %s", lidar_frame.c_str(), ex.what());
                 return;
@@ -109,7 +111,8 @@ namespace small_point_lio {
                 geometry_msgs::msg::TransformStamped lidar_frame_to_base_link_transform;
                 try {
                     // 点云来自 pointcloud_odom_frame (odom系), 需要 T_base_odom 而不是装位 T_base_lidar
-                    lidar_frame_to_base_link_transform = tf_buffer->lookupTransform("base_link", "odom", time_msg);
+                    // 同样改用最新可用TF, 避免时间错位丢帧
+                    lidar_frame_to_base_link_transform = tf_buffer->lookupTransform("base_link", "odom", tf2::TimePointZero);
                 } catch (tf2::TransformException &ex) {
                     RCLCPP_ERROR(rclcpp::get_logger("small_point_lio"), "Failed to lookup transform from %s to base_link: %s", lidar_frame.c_str(), ex.what());
                     return;

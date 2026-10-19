@@ -53,11 +53,19 @@ namespace small_point_lio {
                 // fix gravity direction
                 if (parameters.fix_gravity_direction) {
                     estimator.kf.x.gravity = Eigen::Matrix<state::value_type, 3, 1>::Zero();
+                    Eigen::Matrix<state::value_type, 3, 1> gyro_sum = Eigen::Matrix<state::value_type, 3, 1>::Zero();
                     for (const auto &imu_msg: preprocess.imu_deque) {
                         estimator.kf.x.gravity += imu_msg.linear_acceleration.cast<state::value_type>();
+                        gyro_sum += imu_msg.angular_velocity.cast<state::value_type>();
                     }
+                    const Eigen::Matrix<state::value_type, 3, 1> acc_sum = estimator.kf.x.gravity;
+                    const auto imu_count = static_cast<state::value_type>(preprocess.imu_deque.size());
                     state::value_type scale = -static_cast<state::value_type>(parameters.gravity.norm()) / estimator.kf.x.gravity.norm();
                     estimator.kf.x.gravity *= scale;
+                    // 静止初始化: 同时估计陀螺/加计零偏, 避免滤波器从 0 开始缓慢收敛
+                    // (MID360 实测零偏可达 0.3°/s, 不初始化会导致静止时航向持续漂移)
+                    estimator.kf.x.bg = gyro_sum / imu_count;
+                    estimator.kf.x.ba = acc_sum * (estimator.imu_acceleration_scale / imu_count) + estimator.kf.x.gravity;
                 } else {
                     estimator.kf.x.gravity = parameters.gravity.cast<state::value_type>();
                 }
