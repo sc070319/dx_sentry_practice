@@ -28,4 +28,7 @@ install(
 )
 
 
+install(PROGRAMS scripts/footprint_tf_bridge.py
+        DESTINATION lib/${PROJECT_NAME})
+
 ament_package()

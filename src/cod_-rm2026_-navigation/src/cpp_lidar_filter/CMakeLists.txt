@@ -34,4 +34,7 @@ install(TARGETS
         DESTINATION lib/${PROJECT_NAME}
 )
 
+install(PROGRAMS scripts/ground_filter_node.py
+        DESTINATION lib/${PROJECT_NAME})
+
 ament_package()

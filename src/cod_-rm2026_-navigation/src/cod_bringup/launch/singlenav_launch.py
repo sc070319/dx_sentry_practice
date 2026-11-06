@@ -25,7 +25,7 @@ def generate_launch_description():
     if not os.path.isfile(default_map):
         default_map = os.path.join(src_bringup_dir, 'maps', 'rmul2026.yaml')
 
-    rviz_config_file = os.path.join(bring_up_dir, 'rviz', 'cod_nav.rviz')
+    rviz_config_file = os.path.join(src_bringup_dir, 'rviz', 'cod_nav.rviz')
 
     fast_lio_config_file = 'mid360.yaml'
     # 声明启动参数
@@ -36,7 +36,7 @@ def generate_launch_description():
         'slam_params_file', default_value=os.path.join(bring_up_dir,'params','mapper_params_async.yaml')
     )
     declare_nav2_params_file = DeclareLaunchArgument(
-        'nav2_params_file',default_value=os.path.join(bring_up_dir,'params','singlenav2_params.yaml')
+        'nav2_params_file',default_value=os.path.join(src_bringup_dir,'params','singlenav2_params.yaml')
     )
     declare_rviz = DeclareLaunchArgument(
         'rviz', default_value='true',
@@ -60,13 +60,24 @@ def generate_launch_description():
                 output='screen',
                 parameters=[{
                     'input_topic': '/livox/lidar',
-                    'output_topic': '/livox/lidar_filtered',
-                    'min_x': -0.2, 'max_x': 0.2,
-                    'min_y': -0.2, 'max_y': 0.4,
-                    'min_z': -0.1, 'max_z': 0.2,
+                    'output_topic': '/livox/lidar_cropped',
+                    # 已实测底盘 520x520mm；地面位于 base_link z<0。
+                    'min_x': -0.26, 'max_x': 0.26,
+                    'min_y': -0.26, 'max_y': 0.26,
+                    'min_z': -0.35, 'max_z': 0.60,
                     'negative': True,   # 挖掉车身
                     'leaf_size': 0.05   # 降采样
                 }]
+            ),
+            # 复用建图时已验证的地面和左侧外伸部件过滤。
+            ExecuteProcess(
+                cmd=["python3", os.path.join(
+                    ws_root, "src", "cod_-rm2026_-navigation", "src",
+                    "cpp_lidar_filter", "scripts", "ground_filter_node.py"),
+                    "--ros-args", "-p", "overhang_filter_enabled:=true",
+                    "-p", "overhang_min:=[-0.14,0.25,0.16]",
+                    "-p", "overhang_max:=[0.30,0.44,0.42]"],
+                output="screen",
             ),
             Node(
                     package="small_point_lio",
@@ -110,11 +121,21 @@ def generate_launch_description():
                 output="screen",
                 parameters=[{"use_sim_time": use_sim_time,"spin_speed": 1.0}],
             ),
+            ExecuteProcess(
+                cmd=["python3", os.path.join(
+                    src_bringup_dir, "scripts", "footprint_tf_bridge.py"),
+                    "--ros-args", "-p",
+                    "body_footprint:=[0.30,0.44,0.30,0.25,0.26,-0.26,-0.26,-0.26,-0.26,0.26,-0.14,0.44]"],
+                output="screen",
+            ),
             Node(
                 package="cod_serial_ul26",
                 executable="cod_serial",
                 output="screen",
-                parameters=[{"use_sim_time": use_sim_time}],
+                parameters=[{
+                    "use_sim_time": use_sim_time,
+                    "port": "/dev/serial/by-id/usb-STMicroelectronics_STM32_Virtual_ComPort_374A39593233-if00",
+                }],
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','navigation_launch.py')),

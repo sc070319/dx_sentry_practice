@@ -50,13 +50,30 @@ def generate_launch_description():
                 output='screen',
                 parameters=[{
                     'input_topic': '/livox/lidar',
-                    'output_topic': '/livox/lidar_filtered',
-                    'min_x': -0.2, 'max_x': 0.2,
-                    'min_y': -0.2, 'max_y': 0.4,
-                    'min_z': -0.1, 'max_z': 0.2,
+                    'output_topic': '/livox/lidar_cropped',
+                    # 车身实测 520x520x595mm -> x/y 各 ±0.26
+                    # 注意: z 是 base_link 系, 不是地面系. 实测地面在 base_link 约 -0.16~-0.26,
+                    # 故下界取 -0.35 覆盖底盘下缘(盒内只有机器人自身, 多挖无害);
+                    # 上界 0.60 覆盖 595mm 最高点并留余量
+                    'min_x': -0.26, 'max_x': 0.26,
+                    'min_y': -0.26, 'max_y': 0.26,
+                    'min_z': -0.35, 'max_z': 0.60,
                     'negative': True,   # 挖掉车身
                     'leaf_size': 0.05   # 降采样
                 }]
+            ),
+            # 在 base_link 系去除局部地面，避免 map 系高度变化触发 STVL 误标记。
+            # 直接运行源码，新增脚本不依赖 install 中的旧快照。
+            ExecuteProcess(
+                cmd=["python3", os.path.join(
+                    ws_root, "src", "cod_-rm2026_-navigation", "src",
+                    "cpp_lidar_filter", "scripts", "ground_filter_node.py"),
+                    "--ros-args", "-p", "overhang_filter_enabled:=true",
+                    # 2026-10-22: 已确认左侧部件外伸；实测残留回波 x[-.113,.275],
+                    # y[.260,.415], z[.181,.397]，局部补裁并留 2~3cm 余量。
+                    "-p", "overhang_min:=[-0.14,0.25,0.16]",
+                    "-p", "overhang_max:=[0.30,0.44,0.42]"],
+                output="screen",
             ),
             #启动LIO里程计
             Node(
@@ -132,11 +149,23 @@ def generate_launch_description():
                 output="screen",
                 parameters=[{"use_sim_time": use_sim_time}],
             ),
+            ExecuteProcess(
+                cmd=["python3", os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+                    "scripts", "footprint_tf_bridge.py"), "--ros-args", "-p",
+                    # 底盘 + 左侧外伸部件的保守凸包，必须与车体补裁区域一致。
+                    "body_footprint:=[0.30,0.44,0.30,0.25,0.26,-0.26,-0.26,-0.26,-0.26,0.26,-0.14,0.44]"],
+                output="screen",
+            ),
             Node(
                 package="cod_serial_ul26",
                 executable="cod_serial",
                 output="screen",
-                parameters=[{"use_sim_time": use_sim_time}],
+                parameters=[{
+                    "use_sim_time": use_sim_time,
+                    # 用 by-id 固定串口, 避免电控重新枚举成 ttyACM1 后节点仍绑 ttyACM0
+                    "port": "/dev/serial/by-id/usb-STMicroelectronics_STM32_Virtual_ComPort_374A39593233-if00",
+                }],
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(os.path.join(bring_up_dir,'launch','navigation_launch.py')),

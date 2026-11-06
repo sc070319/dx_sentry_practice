@@ -1,8 +1,9 @@
 // goal_approach_controller.cpp
 // Nav2控制器wrapper：在接近目标时限制线速度，防止高速冲过目标点
-// 原理：透明代理内部控制器（如MPPI），仅在距目标 < approach_distance 时
-//       将合速度钳位到 approach_velocity
+// 原理：透明代理内部控制器（如MPPI），在接近目标时逐步降低合速度上限。
+//       旧参数 approach_velocity 保留为最后的速度上限。
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -55,6 +56,15 @@ public:
     node->get_parameter(name + ".approach_velocity", approach_velocity_);
     node->get_parameter(name + ".direct_approach_distance", direct_approach_distance_);
     node->get_parameter(name + ".direct_approach_kp", direct_approach_kp_);
+    // 未配置最高速度时保持旧行为：整个接近区使用同一个速度上限。
+    nav2_util::declare_parameter_if_not_declared(
+      node, name + ".approach_max_velocity",
+      rclcpp::ParameterValue(approach_velocity_));
+    nav2_util::declare_parameter_if_not_declared(
+      node, name + ".approach_end_distance",
+      rclcpp::ParameterValue(0.2));
+    node->get_parameter(name + ".approach_max_velocity", approach_max_velocity_);
+    node->get_parameter(name + ".approach_end_distance", approach_end_distance_);
 
     // 通过pluginlib加载内部控制器
     loader_ = std::make_unique<pluginlib::ClassLoader<nav2_core::Controller>>(
@@ -64,10 +74,11 @@ public:
 
     RCLCPP_INFO(
       logger_,
-      "GoalApproachController: 包装 [%s], approach_distance=%.2f m, approach_velocity=%.2f m/s, "
-      "direct_approach_distance=%.2f m, direct_approach_kp=%.2f",
+      "GoalApproachController: 包装 [%s], approach_distance=%.2f m, "
+      "approach_velocity=%.2f m/s, approach_max_velocity=%.2f m/s, "
+      "approach_end_distance=%.2f m, direct_approach_distance=%.2f m, direct_approach_kp=%.2f",
       inner_plugin_type.c_str(), approach_distance_, approach_velocity_,
-      direct_approach_distance_, direct_approach_kp_);
+      approach_max_velocity_, approach_end_distance_, direct_approach_distance_, direct_approach_kp_);
   }
 
   void cleanup() override
@@ -104,13 +115,25 @@ public:
     double dx = goal_.pose.position.x - pose.pose.position.x;
     double dy = goal_.pose.position.y - pose.pose.position.y;
     double dist = std::hypot(dx, dy);
+    const double approach_span = std::max(approach_distance_ - approach_end_distance_, 1e-6);
+    const double fraction = std::clamp(
+      (dist - approach_end_distance_) / approach_span, 0.0, 1.0);
+    const double speed_limit = approach_velocity_ +
+      (approach_max_velocity_ - approach_velocity_) * fraction;
 
     if (dist < direct_approach_distance_) {
       // 近距离直接驱动模式：绕过 MPPI 的弧线输出，直接朝目标点走
-      double target_speed = std::min(approach_velocity_, dist * direct_approach_kp_);
+      double target_speed = std::min(speed_limit, dist * direct_approach_kp_);
       if (dist > 0.01) {
-        cmd.twist.linear.x = target_speed * (dx / dist);
-        cmd.twist.linear.y = target_speed * (dy / dist);
+        // pose 和 goal_ 在规划坐标系；Twist 必须用机器人本体坐标系。
+        const auto & q = pose.pose.orientation;
+        const double yaw = std::atan2(
+          2.0 * (q.w * q.z + q.x * q.y),
+          1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+        const double ux = dx / dist;
+        const double uy = dy / dist;
+        cmd.twist.linear.x = target_speed * (std::cos(yaw) * ux + std::sin(yaw) * uy);
+        cmd.twist.linear.y = target_speed * (-std::sin(yaw) * ux + std::cos(yaw) * uy);
       } else {
         cmd.twist.linear.x = 0.0;
         cmd.twist.linear.y = 0.0;
@@ -118,8 +141,8 @@ public:
       cmd.twist.angular.z = 0.0;
     } else if (dist < approach_distance_) {
       double speed = std::hypot(cmd.twist.linear.x, cmd.twist.linear.y);
-      if (speed > approach_velocity_) {
-        double scale = approach_velocity_ / speed;
+      if (speed > speed_limit) {
+        double scale = speed_limit / speed;
         cmd.twist.linear.x *= scale;
         cmd.twist.linear.y *= scale;
         // 角速度也按比例降低，避免原地打转
@@ -142,6 +165,8 @@ private:
   geometry_msgs::msg::PoseStamped goal_;
   double approach_distance_{1.5};
   double approach_velocity_{0.5};
+  double approach_max_velocity_{0.5};
+  double approach_end_distance_{0.2};
   double direct_approach_distance_{0.5};
   double direct_approach_kp_{1.0};
 };

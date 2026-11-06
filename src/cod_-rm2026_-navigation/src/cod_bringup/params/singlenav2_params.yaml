@@ -84,9 +84,11 @@ controller_server:
     FollowPath:
       plugin: "goal_approach_controller::GoalApproachController"
       inner_plugin: "nav2_mppi_controller::MPPIController"
-      approach_distance: 2.5 #距目标时开始限速
-      approach_velocity: 0.2
-      direct_approach_distance: 2.0 #进入直接驱动模式的距离，绕过MPPI防止画弧
+      approach_distance: 2.5 #距目标2.5m时，速度上限从1.5m/s逐步降低
+      approach_velocity: 0.2 #旧插件仍按原有0.2m/s限速；新插件用作最终上限
+      approach_max_velocity: 1.5
+      approach_end_distance: 0.2
+      direct_approach_distance: 0.5 #最后0.5m直接驱动，避免过早绕过MPPI
       direct_approach_kp: 3.0 #直接驱动P控制增益
       time_steps: 80 #增加到80，预测时域4.8s，让MPPI能看到冲过目标的后果
       model_dt: 0.02 #稍微放大步长，配合time_steps延长预测时域
@@ -189,8 +191,9 @@ local_costmap:
       width: 6
       height: 6
       resolution: 0.05
-      robot_radius: 0.1
-      footprint: "[ [0.1, 0.1], [0.1, -0.1], [-0.1, -0.1], [-0.1, 0.1] ]"
+      robot_radius: 0.2
+      # 底盘和已确认的左侧外伸部件；运行时由 bridge 转换到 base_link_fake。
+      footprint: "[ [0.30, 0.44], [0.30, 0.25], [0.26, -0.26], [-0.26, -0.26], [-0.26, 0.26], [-0.14, 0.44] ]"
       plugins: [ "static_layer", "stvl_voxel_layer", "inflation_layer" ]
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
@@ -198,12 +201,12 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 5.0 #关键修正！原0.3衰减太慢，整个膨胀区代价都极高，MPPI没有梯度可用。5.0让代价快速衰减，形成清晰的"远离障碍物"梯度
-        inflation_radius: 0.55 #加大膨胀半径，高速下需要更早看到障碍物
+        inflation_radius: 0.45 #加大膨胀半径，高速下需要更早看到障碍物
       stvl_voxel_layer:
         plugin: "spatio_temporal_voxel_layer/SpatioTemporalVoxelLayer"
         enabled: true
-        voxel_decay: 3.0 #seconds if linear, e^n if exponential
-        decay_model: 2 #0=linear, 1=exponential, 2=persistent（持久，避免闪烁）
+        voxel_decay: 5.0 #局部误标记线性衰减 5 秒
+        decay_model: 0 #0=linear；2=persistent 会使 voxel_decay 失效
         voxel_size: 0.05 #meters
         track_unknown_space: true #default space is unknown
         observation_persistence: 0.0 #seconds
@@ -228,7 +231,7 @@ local_costmap:
           obstacle_range: 8.0
           raytrace_range: 9.0
 
-          min_obstacle_height: 0.15 #default 0, meters
+          min_obstacle_height: 0.1 #地面已在 base_link 系单独过滤
           max_obstacle_height: 2.0 #meters, 与层max_obstacle_height一致
           expected_update_rate: 0.0 #default 0, if not updating at this rate at least, remove from buffer
           observation_persistence: 0.0 #default 0, use all measurements taken during now-value, 0=latest
@@ -237,8 +240,8 @@ local_costmap:
           filter: "voxel" #default passthrough, apply "voxel", "passthrough", or no filter to sensor data, recommended to have at one filter on
           voxel_min_points: 0 #default 0, minimum points per voxel for voxel filter
           model_type: 1
-          vertical_fov_angle: 0.7 #radians, sensor系已改base_link因此FOV过滤不适用
-          vertical_fov_offset: 0.0
+          vertical_fov_angle: 1.03 #Mid-360 垂直视场约 -7°～+52°
+          vertical_fov_offset: 0.3927
           horizontal_fov_angle: 6.28
       always_send_full_costmap: False
 
@@ -253,8 +256,9 @@ global_costmap:
       robot_base_frame: base_link_fake
       rolling_window: false
       use_sim_time: False
-      robot_radius: 0.1
-      footprint: "[ [0.1, 0.1], [0.1, -0.1], [-0.1, -0.1], [-0.1, 0.1] ]"
+      robot_radius: 0.2
+      # 与局部地图使用同一实际车身轮廓。
+      footprint: "[ [0.30, 0.44], [0.30, 0.25], [0.26, -0.26], [-0.26, -0.26], [-0.26, 0.26], [-0.14, 0.44] ]"
       resolution: 0.05
       track_unknown_space: true
       plugins: [ "static_layer", "stvl_voxel_layer", "inflation_layer" ]
@@ -269,8 +273,8 @@ global_costmap:
       stvl_voxel_layer:
         plugin: "spatio_temporal_voxel_layer/SpatioTemporalVoxelLayer"
         enabled: true
-        voxel_decay: 3.0 #seconds if linear, e^n if exponential
-        decay_model: 2 #0=linear, 1=exponential, 2=persistent（持久，避免闪烁）
+        voxel_decay: 30.0 #全局误标记线性衰减 30 秒
+        decay_model: 0 #0=linear；2=persistent 会使 voxel_decay 失效
         voxel_size: 0.05 #meters
         track_unknown_space: true #default space is unknown
         observation_persistence: 0.0 #seconds
@@ -295,7 +299,7 @@ global_costmap:
           obstacle_range: 8.0
           raytrace_range: 9.0
 
-          min_obstacle_height: 0.15 #default 0, meters
+          min_obstacle_height: 0.1 #地面已在 base_link 系单独过滤
           max_obstacle_height: 2.0 #meters, 与层max_obstacle_height一致
           expected_update_rate: 0.0 #default 0, if not updating at this rate at least, remove from buffer
           observation_persistence: 0.0 #default 0, use all measurements taken during now-value, 0=latest
@@ -304,8 +308,8 @@ global_costmap:
           filter: "voxel" #default passthrough, apply "voxel", "passthrough", or no filter to sensor data, recommended to have at one filter on
           voxel_min_points: 0 #default 0, minimum points per voxel for voxel filter
           model_type: 1
-          vertical_fov_angle: 0.7 #radians, sensor系已改base_link因此FOV过滤不适用
-          vertical_fov_offset: 0.0
+          vertical_fov_angle: 1.03 #Mid-360 垂直视场约 -7°～+52°
+          vertical_fov_offset: 0.3927
           horizontal_fov_angle: 6.28
       always_send_full_costmap: False
 

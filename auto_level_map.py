@@ -20,8 +20,9 @@
     measure_delay  启动后延迟测量秒数   (默认 12s)
     sample_gap     采样间隔            (默认 3s)
     ring_min/max   地面点环带(m)        (默认 2.0 / 6.0)
+    ground_min/max_height  base_link 系地面候选高度（默认 -0.5 / 0.05 m）
     yaw_offset     额外绕 map z 旋转    (默认 0.0; singlenav 对旧图用 -0.5)
-    z_offset       map->odom 的 z      (默认 0.05)
+    z_offset       标定后地面在 map 中的 z（默认 0.05）；标定前作临时 TF z
 """
 import math
 import time
@@ -38,6 +39,14 @@ from tf2_ros import Buffer, TransformBroadcaster, TransformListener
 def rot_z(a):
     c, s = math.cos(a), math.sin(a)
     return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+
+
+def quat_to_mat(q):
+    x, y, z, w = q.x, q.y, q.z, q.w
+    return np.array([
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
 
 
 def rotation_from_to(a, b):
@@ -84,6 +93,7 @@ class AutoLevelMap(Node):
                               ('odom_frame', 'odom'), ('initial_roll', 0.3839),
                               ('measure_delay', 12.0), ('sample_gap', 3.0),
                               ('ring_min', 2.0), ('ring_max', 6.0),
+                              ('ground_min_height', -0.5), ('ground_max_height', 0.05),
                               ('yaw_offset', 0.0), ('z_offset', 0.05),
                               ('publish_tf', True)):
             self.declare_parameter(name, default)
@@ -94,8 +104,11 @@ class AutoLevelMap(Node):
         self.odom_frame = self.get_parameter('odom_frame').value
         self.ring_min = float(self.get_parameter('ring_min').value)
         self.ring_max = float(self.get_parameter('ring_max').value)
+        self.ground_min_height = float(self.get_parameter('ground_min_height').value)
+        self.ground_max_height = float(self.get_parameter('ground_max_height').value)
         self.yaw_offset = float(self.get_parameter('yaw_offset').value)
         self.z_offset = float(self.get_parameter('z_offset').value)
+        self.tf_z = self.z_offset
         self.sample_gap = float(self.get_parameter('sample_gap').value)
 
         roll0 = float(self.get_parameter('initial_roll').value)
@@ -133,7 +146,7 @@ class AutoLevelMap(Node):
         t.header.stamp = self.get_clock().now().to_msg()
         t.header.frame_id = self.map_frame
         t.child_frame_id = self.odom_frame
-        t.transform.translation.z = self.z_offset
+        t.transform.translation.z = self.tf_z
         x, y, z, w = self.quat
         t.transform.rotation.x = x
         t.transform.rotation.y = y
@@ -162,22 +175,22 @@ class AutoLevelMap(Node):
         pts = pts[np.isfinite(pts).all(axis=1)]
 
         frame = msg.header.frame_id
-        tr = None
         try:
-            tr = self.buf.lookup_transform(self.odom_frame, frame, rclpy.time.Time())
+            tr_odom = self.buf.lookup_transform(self.odom_frame, frame, rclpy.time.Time())
+            tr_base = self.buf.lookup_transform('base_link', frame, rclpy.time.Time())
         except Exception:
             return None
-        q = tr.transform.rotation
-        xx, yy, zz, ww = q.x, q.y, q.z, q.w
-        R_tf = np.array([
-            [1 - 2 * (yy * yy + zz * zz), 2 * (xx * yy - zz * ww), 2 * (xx * zz + yy * ww)],
-            [2 * (xx * yy + zz * ww), 1 - 2 * (xx * xx + zz * zz), 2 * (yy * zz - xx * ww)],
-            [2 * (xx * zz - yy * ww), 2 * (yy * zz + xx * ww), 1 - 2 * (xx * xx + yy * yy)]])
-        t = tr.transform.translation
-        pts = pts @ R_tf.T + np.array([t.x, t.y, t.z])
+        t_odom = tr_odom.transform.translation
+        pts_odom = pts @ quat_to_mat(tr_odom.transform.rotation).T + np.array(
+            [t_odom.x, t_odom.y, t_odom.z])
+        t_base = tr_base.transform.translation
+        pts_base = pts @ quat_to_mat(tr_base.transform.rotation).T + np.array(
+            [t_base.x, t_base.y, t_base.z])
 
-        r = np.hypot(pts[:, 0], pts[:, 1])
-        p = pts[(r > self.ring_min) & (r < self.ring_max)]
+        r = np.hypot(pts_base[:, 0], pts_base[:, 1])
+        ground = ((pts_base[:, 2] > self.ground_min_height) &
+                  (pts_base[:, 2] < self.ground_max_height))
+        p = pts_odom[(r > self.ring_min) & (r < self.ring_max) & ground]
         if len(p) < 500:
             return None
 
@@ -204,7 +217,7 @@ class AutoLevelMap(Node):
         nvec = Vt[2]
         if nvec[2] < 0:
             nvec = -nvec
-        return rotation_from_to(nvec, np.array([0.0, 0.0, 1.0]))
+        return rotation_from_to(nvec, np.array([0.0, 0.0, 1.0])), cen
 
     def try_measure(self):
         if self.done or time.time() < self.next_time:
@@ -213,15 +226,15 @@ class AutoLevelMap(Node):
             self.get_logger().warn('还没收到点云, 3 秒后重试')
             self.next_time = time.time() + 3.0
             return
-        R = self.measure_once()
-        if R is None:
+        measurement = self.measure_once()
+        if measurement is None:
             self.get_logger().warn('地面拟合失败(TF没好/点太少), 3 秒后重试')
             self.next_time = time.time() + 3.0
             return
-        self.samples.append(R)
+        self.samples.append(measurement)
         self.get_logger().info('地面采样 %d/3 完成' % len(self.samples))
         if len(self.samples) >= 3:
-            Rm = np.mean(np.array(self.samples), axis=0)
+            Rm = np.mean(np.array([R for R, _ in self.samples]), axis=0)
             U, _, Vt = np.linalg.svd(Rm)
             Rm = U @ Vt
             if np.linalg.det(Rm) < 0:
@@ -229,11 +242,13 @@ class AutoLevelMap(Node):
                 Rm = U @ Vt
             self.R = rot_z(self.yaw_offset) @ Rm
             self.quat = mat_to_quat(self.R)
+            floor_z = np.mean([(self.R @ center)[2] for _, center in self.samples])
+            self.tf_z = self.z_offset - float(floor_z)
             roll, pitch, yaw = mat_to_rpy(self.R)
             self.done = True
             self.get_logger().info(
-                'map->odom 自动水平补偿就绪: roll=%.2f° pitch=%.2f° yaw=%.2f°'
-                % (math.degrees(roll), math.degrees(pitch), math.degrees(yaw)))
+                'map->odom 自动水平补偿就绪: roll=%.2f° pitch=%.2f° yaw=%.2f° z=%.3fm'
+                % (math.degrees(roll), math.degrees(pitch), math.degrees(yaw), self.tf_z))
         else:
             self.next_time = time.time() + self.sample_gap
 

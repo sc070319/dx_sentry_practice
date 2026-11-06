@@ -11,7 +11,7 @@
 set -uo pipefail
 
 WS="$HOME/Desktop/COD26_ws"
-PATTERNS='singlenav_launch.py|multiplenav_launch.py|nav_MID360_launch.py|msg_MID360_launch.py|rviz_MID360_launch.py|livox_ros_driver2_node|small_point_lio|yaw_tf_broadcaster|fake_vel_transform|auto_level_map|async_slam_toolbox|pointcloud_to_laserscan|lidar_filter_node|nav2_lifecycle_manager|nav2_controller|nav2_planner|nav2_bt_navigator|nav2_map_server|nav2_behaviors|nav2_smoother|nav2_waypoint|nav2_velocity_smoother|cod_serial_ul26/cod_serial|rviz2 -d .*cod_nav'
+PATTERNS='singlenav_launch.py|multiplenav_launch.py|nav_MID360_launch.py|msg_MID360_launch.py|rviz_MID360_launch.py|livox_ros_driver2_node|small_point_lio|yaw_tf_broadcaster|fake_vel_transform|auto_level_map|ground_filter_node.py|footprint_tf_bridge.py|async_slam_toolbox|pointcloud_to_laserscan|lidar_filter_node|nav2_lifecycle_manager|nav2_controller|nav2_planner|nav2_bt_navigator|nav2_map_server|nav2_behaviors|nav2_smoother|nav2_waypoint|nav2_velocity_smoother|cod_serial_ul26/cod_serial|rviz2 -d .*cod_nav'
 
 echo "==== 1. 停止旧实例 ===="
 pkill -TERM -f "$PATTERNS" 2>/dev/null || true

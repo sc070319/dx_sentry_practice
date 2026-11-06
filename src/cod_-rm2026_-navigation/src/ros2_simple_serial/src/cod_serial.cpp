@@ -8,9 +8,9 @@
 #include <cmath>
 #include <cstdint>
 
-// ================= CRC16 (电控实测: poly=0x8408(反射), init=0xFFFF, 小端存放) =================
-// 注: 不是 RM 标准 CRC(0xA001); 实测覆盖 [0:27], 1642/1642 帧通过
-static uint16_t crc16_uplink(const uint8_t *data, size_t len)
+// ================= CRC16 (电控协议: poly=0x8408(反射), init=0xFFFF, 小端存放) =================
+// 上行覆盖前 27 字节，下行覆盖前 13 字节；均不做最终异或。
+static uint16_t crc16_packet(const uint8_t *data, size_t len)
 {
   uint16_t crc = 0xFFFF;
   for (size_t i = 0; i < len; ++i) {
@@ -100,9 +100,10 @@ private:
     std::memcpy(&packet[5], &vy, sizeof(float));
     std::memcpy(&packet[9], &vz, sizeof(float));
 
-    uint16_t checksum = header;                       // 累加校验
-    for (int i = 1; i < 13; ++i) checksum += packet[i];
-    std::memcpy(&packet[13], &checksum, sizeof(uint16_t));
+    // 与电控 Verify_CRC16_Check_Sum(packet, 15) 一致：CRC 覆盖前 13 字节。
+    const uint16_t checksum = crc16_packet(packet, sizeof(packet) - 2);
+    packet[13] = static_cast<uint8_t>(checksum & 0xFF);
+    packet[14] = static_cast<uint8_t>(checksum >> 8);
 
     if (!ensureOpen()) return;
     int n = uart_.writeBuffer(packet, sizeof(packet));
@@ -139,7 +140,7 @@ private:
       }
 
       // ② CRC16 校验: 前 CRC_COVER 字节算出的 CRC, 与末尾 2 字节(小端)比较
-      uint16_t crc_calc = crc16_uplink(rx_cache_.data(), CRC_COVER);
+      uint16_t crc_calc = crc16_packet(rx_cache_.data(), CRC_COVER);
       uint16_t crc_recv = static_cast<uint16_t>(
         rx_cache_[UPLINK_LEN - 2] | (rx_cache_[UPLINK_LEN - 1] << 8));
       if (crc_calc != crc_recv) {
